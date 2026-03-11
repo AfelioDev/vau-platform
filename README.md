@@ -4,6 +4,58 @@ Sistema de verificación vehicular mexicana. Permite consultar datos del **Regis
 
 ---
 
+## Repositorios del proyecto
+
+Cada módulo tiene su propio repositorio. Deben clonarse e instalarse en este orden:
+
+| # | Módulo | Repositorio | Puerto |
+|---|--------|-------------|--------|
+| 1 | Platform (este repo) | [validarauto-platform](https://github.com/AfelioDev/validarauto-platform) | — |
+| 2 | Common (DTOs compartidos) | [validarauto-common](https://github.com/AfelioDev/validarauto-common) | — |
+| 3 | Gateway | [validarauto-gateway](https://github.com/AfelioDev/validarauto-gateway) | 8080 |
+| 4 | Auth | [validarauto-auth](https://github.com/AfelioDev/validarauto-auth) | 8081 |
+| 5 | Reporte | [validarauto-reporte](https://github.com/AfelioDev/validarauto-reporte) | 8082 |
+| 6 | Repuve | [validarauto-repuve](https://github.com/AfelioDev/validarauto-repuve) | 8083 |
+| 7 | Adeudos | [validarauto-adeudos](https://github.com/AfelioDev/validarauto-adeudos) | 8084 |
+
+---
+
+## Setup desde repos separados (primera vez)
+
+```bash
+# 1. Platform — instala el parent POM en ~/.m2
+git clone https://github.com/AfelioDev/validarauto-platform.git
+cd validarauto-platform
+chmod +x bootstrap.sh && ./bootstrap.sh
+cd ..
+
+# 2. Common — instala el JAR compartido en ~/.m2
+git clone https://github.com/AfelioDev/validarauto-common.git
+cd validarauto-common
+mvn install -q
+cd ..
+
+# 3. Cualquier servicio ya puede compilarse de forma independiente
+git clone https://github.com/AfelioDev/validarauto-auth.git
+cd validarauto-auth && mvn package -DskipTests && cd ..
+
+git clone https://github.com/AfelioDev/validarauto-reporte.git
+cd validarauto-reporte && mvn package -DskipTests && cd ..
+
+# ... igual para gateway, repuve, adeudos
+```
+
+## Levantar la infraestructura con Docker
+
+```bash
+# En validarauto-platform:
+cp .env.example .env     # editar JWT_SECRET y API keys
+docker compose up -d
+docker compose ps        # todos deben mostrar (healthy)
+```
+
+---
+
 ## Arquitectura
 
 ```
@@ -27,8 +79,6 @@ Sistema de verificación vehicular mexicana. Permite consultar datos del **Regis
                                  ┌─────────────▼──┐  ┌────▼───────────────┐
                                  │ repuve-service   │  │  adeudos-service    │
                                  │    (:8083)       │  │     (:8084)         │
-                                 │ Spring MVC ·     │  │  Spring MVC ·       │
-                                 │ Caffeine · CB    │  │  Caffeine · CB      │
                                  └──────────────────┘  └────────────────────┘
                                          │                      │
                                  ┌───────▼──────────────────────▼────────────┐
@@ -45,161 +95,60 @@ Sistema de verificación vehicular mexicana. Permite consultar datos del **Regis
 
 ---
 
-## Puertos de servicios
+## Endpoints API
 
-| Servicio           | Puerto | Tecnología principal              | Swagger UI                              |
-|--------------------|--------|-----------------------------------|-----------------------------------------|
-| `gateway-service`  | 8080   | Spring Cloud Gateway (WebFlux)    | N/A                                     |
-| `auth-service`     | 8081   | Spring MVC + Security + JPA       | http://localhost:8081/swagger-ui.html   |
-| `reporte-service`  | 8082   | Spring WebFlux + R2DBC            | http://localhost:8082/swagger-ui.html   |
-| `repuve-service`   | 8083   | Spring MVC                        | http://localhost:8083/swagger-ui.html   |
-| `adeudos-service`  | 8084   | Spring MVC                        | http://localhost:8084/swagger-ui.html   |
+| Método | Ruta (vía gateway :8080) | Auth | Descripción |
+|--------|--------------------------|------|-------------|
+| POST | `/api/auth/register` | No | Registrar usuario |
+| POST | `/api/auth/login` | No | Login — obtener tokens JWT |
+| POST | `/api/auth/refresh` | No | Renovar access token |
+| GET | `/api/auth/me` | JWT | Perfil del usuario autenticado |
+| POST | `/api/reports/generate` | JWT | Generar reporte vehicular |
+| GET | `/api/reports/{id}` | JWT | Obtener reporte por UUID |
+| GET | `/api/reports/my-reports` | JWT | Listar reportes del usuario |
+| GET | `/api/repuve/consultar/{licensePlate}` | No | Consultar REPUVE |
+| GET | `/api/adeudos/consultar/{licensePlate}` | No | Consultar adeudos |
 
----
-
-## Quick Start
-
-### Levantar toda la plataforma con Docker Compose
-
-```bash
-# Desde la raíz del proyecto
-docker compose up -d
-
-# Verificar estado de los servicios
-docker compose ps
-
-# Ver logs de todos los servicios
-docker compose logs -f
-
-# Ver logs de un servicio específico
-docker compose logs -f auth-service
-```
-
-La plataforma estará lista cuando todos los servicios reporten `healthy` en `docker compose ps`.
-
-### Flujo de uso básico
+### Ejemplo rápido
 
 ```bash
-# 1. Registrar usuario
+# Registrar
 curl -X POST http://localhost:8080/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"test@ejemplo.mx","password":"Password123","nombre":"Test","apellido":"User"}'
+  -d '{"email":"test@example.mx","password":"Test1234","firstName":"Juan","lastName":"García"}'
 
-# 2. Guardar el accessToken de la respuesta
-TOKEN="eyJhbGciOiJIUzI1NiJ9..."
+# Login y guardar token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.mx","password":"Test1234"}' | jq -r '.data.accessToken')
 
-# 3. Generar un reporte vehicular
-curl -X POST http://localhost:8080/api/reportes/consultar \
+# Generar reporte
+curl -X POST http://localhost:8080/api/reports/generate \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"placa":"ABC-123-D","planReporte":"BASICO"}'
+  -d '{"licensePlate":"ABC-123","reportPlan":"BASICO"}'
 ```
-
----
-
-## Resumen de endpoints API
-
-| Método | Ruta (vía gateway :8080)             | Auth   | Descripción                         |
-|--------|--------------------------------------|--------|-------------------------------------|
-| POST   | `/api/auth/register`                 | No     | Registrar nuevo usuario             |
-| POST   | `/api/auth/login`                    | No     | Login — obtener tokens JWT          |
-| POST   | `/api/auth/refresh`                  | No     | Renovar access token                |
-| GET    | `/api/auth/me`                       | JWT    | Perfil del usuario autenticado      |
-| POST   | `/api/reportes/consultar`            | JWT    | Generar reporte vehicular completo  |
-| GET    | `/api/reportes/{id}`                 | JWT    | Obtener reporte por UUID            |
-| GET    | `/api/reportes/mis-reportes`         | JWT    | Listar reportes del usuario         |
-| GET    | `/api/repuve/consultar/{placa}`      | No     | Consultar vehículo en REPUVE        |
-| GET    | `/api/adeudos/consultar/{placa}`     | No     | Consultar adeudos del vehículo      |
 
 ---
 
 ## Variables de entorno
 
-| Variable                  | Servicios que la usan                    | Valor por defecto                                        | Descripción                         |
-|---------------------------|------------------------------------------|----------------------------------------------------------|-------------------------------------|
-| `DB_HOST`                 | auth-service, reporte-service            | `postgres`                                               | Host de PostgreSQL                  |
-| `DB_PORT`                 | auth-service, reporte-service            | `5432`                                                   | Puerto de PostgreSQL                |
-| `DB_NAME`                 | auth-service, reporte-service            | `validarauto`                                            | Nombre de la base de datos          |
-| `DB_USER`                 | auth-service, reporte-service            | `validarauto`                                            | Usuario de PostgreSQL               |
-| `DB_PASSWORD`             | auth-service, reporte-service            | `validarauto123`                                         | Contraseña de PostgreSQL            |
-| `JWT_SECRET`              | auth-service, reporte-service            | `validarauto-super-secret-key-...` (>= 256 bits)         | Clave HMAC-SHA256 para firmar JWT   |
-| `JWT_ISSUER_URI`          | gateway-service                          | `http://auth-service:8081`                               | Emisor JWT para validación          |
-| `JWT_JWK_SET_URI`         | gateway-service                          | `http://auth-service:8081/api/auth/.well-known/jwks.json`| JWK Set URI                        |
-| `REDIS_HOST`              | gateway-service, reporte-service         | `redis`                                                  | Host de Redis                       |
-| `REDIS_PORT`              | gateway-service, reporte-service         | `6379`                                                   | Puerto de Redis                     |
-| `REDIS_PASSWORD`          | gateway-service, reporte-service         | *(vacío)*                                                | Contraseña de Redis                 |
-| `KAFKA_BOOTSTRAP_SERVERS` | reporte-service                          | `kafka:9092`                                             | Kafka bootstrap servers             |
-| `REPUVE_API_URL`          | repuve-service                           | *(vacío — activa modo demo)*                             | URL base del API externo REPUVE     |
-| `REPUVE_API_KEY`          | repuve-service                           | *(vacío — activa modo demo)*                             | API key del proveedor REPUVE        |
-| `REPUVE_SERVICE_URL`      | reporte-service                          | `http://repuve-service:8083`                             | URL interna del repuve-service      |
-| `ADEUDOS_API_URL`         | adeudos-service                          | *(vacío — activa modo demo)*                             | URL base del API externo de adeudos |
-| `ADEUDOS_API_KEY`         | adeudos-service                          | *(vacío — activa modo demo)*                             | API key del proveedor de adeudos    |
-| `ADEUDOS_SERVICE_URL`     | reporte-service                          | `http://adeudos-service:8084`                            | URL interna del adeudos-service     |
+Copia `.env.example` a `.env` y configura:
+
+| Variable | Descripción | Default |
+|----------|-------------|---------|
+| `JWT_SECRET` | Secreto HMAC-HS512 para firmar JWT (mín. 64 chars) | valor de ejemplo |
+| `REPUVE_API_KEY` | API key REPUVE — vacío activa modo demo | — |
+| `ADEUDOS_API_KEY` | API key Adeudos MX — vacío activa modo demo | — |
+| `DB_PASSWORD` | Contraseña PostgreSQL | `validarauto123` |
 
 ---
 
-## Modo Demo vs. Producción
+## Stack técnico
 
-Por defecto, los servicios de datos (repuve-service y adeudos-service) arrancan en **modo demo** cuando no tienen API keys configuradas. Esto permite desarrollar y probar sin necesidad de contratar acceso a las APIs externas.
-
-### Activar modo producción para REPUVE:
-```bash
-export REPUVE_API_URL=https://api.proveedor-repuve.mx/v1
-export REPUVE_API_KEY=tu-api-key-real
-docker compose up -d repuve-service
-```
-
-### Activar modo producción para Adeudos:
-```bash
-export ADEUDOS_API_URL=https://api.proveedor-adeudos.mx/v1
-export ADEUDOS_API_KEY=tu-api-key-real
-docker compose up -d adeudos-service
-```
-
----
-
-## Estructura del proyecto
-
-```
-validarauto/
-├── pom.xml                    # Parent POM (groupId: mx.validarauto, v1.0.0-SNAPSHOT)
-├── docker-compose.yml         # Orquestación completa de la plataforma
-├── common/                    # Módulo compartido: DTOs, excepciones, configs
-├── gateway-service/           # Puerto 8080 — Spring Cloud Gateway
-├── auth-service/              # Puerto 8081 — Autenticación JWT
-├── reporte-service/           # Puerto 8082 — Orquestador reactivo (WebFlux)
-├── repuve-service/            # Puerto 8083 — Consulta REPUVE
-└── adeudos-service/           # Puerto 8084 — Consulta adeudos
-```
-
----
-
-## Tecnologías utilizadas
-
-| Categoría         | Tecnología                                              |
-|-------------------|---------------------------------------------------------|
-| Framework base    | Spring Boot 3.3.4, Java 21                              |
-| Servicios reactivos| Spring WebFlux, R2DBC, Reactor                        |
-| Seguridad         | Spring Security, JJWT 0.12.6, OAuth2 Resource Server   |
-| Persistencia      | Spring Data JPA (MVC), Spring Data R2DBC (WebFlux)      |
-| Base de datos     | PostgreSQL                                              |
-| Caché L1          | Caffeine (in-memory, repuve y adeudos)                  |
-| Caché L2          | Redis (reporte-service, 24h TTL)                        |
-| Mensajería        | Apache Kafka (eventos reporte.generado)                 |
-| Circuit Breaker   | Resilience4j 2.2.0                                      |
-| Migraciones DB    | Flyway (auth-service)                                   |
-| Documentación API | SpringDoc OpenAPI 2.6.0                                 |
-| Build             | Maven (multi-módulo)                                    |
-| Contenedores      | Docker + Docker Compose                                 |
-| Gateway           | Spring Cloud Gateway 2023.0.3                           |
-
----
-
-## Swagger UI de cada servicio
-
-Acceder directamente a cada servicio (no pasan por el gateway):
-
-- Auth Service: http://localhost:8081/swagger-ui.html
-- Reporte Service: http://localhost:8082/swagger-ui.html
-- REPUVE Service: http://localhost:8083/swagger-ui.html
-- Adeudos Service: http://localhost:8084/swagger-ui.html
+- **Java 21** · Spring Boot 4.0.3 · Spring Cloud 2025.1.1
+- **PostgreSQL 16** · Redis 7 · Apache Kafka 3.7
+- **Resilience4j 2.2.0** — circuit breakers en clientes externos
+- **JJWT 0.12.6** — tokens HS512 (access 24h + refresh 7d)
+- **OAS 3.0** como fuente de verdad para todos los DTOs (openapi-generator-maven-plugin)
+- **Swagger UI** en cada servicio: `:808{1-4}/swagger-ui.html`
