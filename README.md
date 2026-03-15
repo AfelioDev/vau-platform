@@ -1,6 +1,6 @@
 # ValidarAuto — Plataforma de Verificación Vehicular
 
-Sistema de verificación vehicular mexicana. Permite consultar datos del **Registro Público Vehicular (REPUVE)** y **adeudos** (tenencia, multas, fotocívicas) de cualquier vehículo mediante su placa.
+Sistema de verificación vehicular mexicana. Permite consultar datos del **Registro Público Vehicular (REPUVE)**, estado de robo y **adeudos** (tenencia, multas, fotocívicas) de cualquier vehículo mediante su placa o NIV.
 
 ---
 
@@ -35,23 +35,25 @@ cd validarauto-common
 mvn install -q
 cd ..
 
-# 3. Cualquier servicio ya puede compilarse de forma independiente
+# 3. Compilar cada servicio de forma independiente
 git clone https://github.com/AfelioDev/validarauto-auth.git
-cd validarauto-auth && mvn package -DskipTests && cd ..
-
+git clone https://github.com/AfelioDev/validarauto-gateway.git
 git clone https://github.com/AfelioDev/validarauto-reporte.git
-cd validarauto-reporte && mvn package -DskipTests && cd ..
+git clone https://github.com/AfelioDev/validarauto-repuve.git
+git clone https://github.com/AfelioDev/validarauto-adeudos.git
 
-# ... igual para gateway, repuve, adeudos
+for svc in validarauto-auth validarauto-gateway validarauto-reporte validarauto-repuve validarauto-adeudos; do
+  cd $svc && mvn package -DskipTests -q && cd ..
+done
 ```
 
 ## Levantar la infraestructura con Docker
 
 ```bash
-# En validarauto-platform:
-cp .env.example .env     # editar JWT_SECRET y API keys
+# Desde validarauto-platform:
+cp .env.example .env          # editar variables (ver sección Variables de entorno)
 docker compose up -d
-docker compose ps        # todos deben mostrar (healthy)
+docker compose ps             # todos deben mostrar (healthy)
 ```
 
 ---
@@ -68,8 +70,8 @@ docker compose ps        # todos deben mostrar (healthy)
                          │  Spring Cloud Gateway · Rate Limit · JWT Val │
                          └──────┬──────────┬──────────┬────────────────┘
                                 │          │          │
-               /api/auth/**     │          │          │  /api/repuve/**
-                                │          │          │  /api/adeudos/**
+               /api/auth/**     │          │ /api/reports/**  /api/repuve/**
+                                │          │          │       /api/adeudos/**
          ┌──────────────────────▼──┐  ┌───▼──────────▼──────────────┐
          │   auth-service (:8081)   │  │   reporte-service (:8082)    │
          │  Spring MVC · JWT · PG  │  │  Spring WebFlux · R2DBC · PG │
@@ -79,11 +81,11 @@ docker compose ps        # todos deben mostrar (healthy)
                                  ┌─────────────▼──┐  ┌────▼───────────────┐
                                  │ repuve-service   │  │  adeudos-service    │
                                  │    (:8083)       │  │     (:8084)         │
-                                 └──────────────────┘  └────────────────────┘
-                                         │                      │
-                                 ┌───────▼──────────────────────▼────────────┐
-                                 │         APIs Externas (Modo Producción)     │
-                                 │    REPUVE API          Adeudos API          │
+                                 └────────┬─────────┘  └────────────────────┘
+                                          │
+                                 ┌────────▼──────────────────────────────────┐
+                                 │         placas.info API v2                  │
+                                 │  REPUVE · PGJ · OCRA · RAPI · CarFax       │
                                  └────────────────────────────────────────────┘
 
    Infraestructura compartida:
@@ -97,36 +99,40 @@ docker compose ps        # todos deben mostrar (healthy)
 
 ## Endpoints API
 
-| Método | Ruta (vía gateway :8080) | Auth | Descripción |
-|--------|--------------------------|------|-------------|
-| POST | `/api/auth/register` | No | Registrar usuario |
-| POST | `/api/auth/login` | No | Login — obtener tokens JWT |
-| POST | `/api/auth/refresh` | No | Renovar access token |
-| GET | `/api/auth/me` | JWT | Perfil del usuario autenticado |
-| POST | `/api/reports/generate` | JWT | Generar reporte vehicular |
-| GET | `/api/reports/{id}` | JWT | Obtener reporte por UUID |
-| GET | `/api/reports/my-reports` | JWT | Listar reportes del usuario |
-| GET | `/api/repuve/consultar/{licensePlate}` | No | Consultar REPUVE |
-| GET | `/api/adeudos/consultar/{licensePlate}` | No | Consultar adeudos |
+| Método | Ruta (vía gateway :8080)               | Auth | Descripción                         |
+|--------|----------------------------------------|------|-------------------------------------|
+| POST   | `/api/auth/register`                   | No   | Registrar usuario                   |
+| POST   | `/api/auth/login`                      | No   | Login — obtener tokens JWT          |
+| POST   | `/api/auth/refresh`                    | No   | Renovar access token                |
+| GET    | `/api/auth/me`                         | JWT  | Perfil del usuario autenticado      |
+| POST   | `/api/reports/generate`                | JWT  | Generar reporte vehicular           |
+| GET    | `/api/reports/{id}`                    | JWT  | Obtener reporte por UUID            |
+| GET    | `/api/reports/my-reports`             | JWT  | Listar reportes del usuario         |
+| GET    | `/api/repuve/consultar/{licensePlate}` | No   | Consultar REPUVE + robo (placas.info) |
+| GET    | `/api/adeudos/consultar/{licensePlate}`| No   | Consultar adeudos vehiculares       |
 
-### Ejemplo rápido
+### Ejemplo rápido end-to-end
 
 ```bash
-# Registrar
+# Registrar usuario
 curl -X POST http://localhost:8080/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"test@example.mx","password":"Test1234","firstName":"Juan","lastName":"García"}'
+  -d '{"email":"test@example.mx","password":"Test1234!","firstName":"Juan","lastName":"García"}'
 
 # Login y guardar token
 TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"test@example.mx","password":"Test1234"}' | jq -r '.data.accessToken')
+  -d '{"email":"test@example.mx","password":"Test1234!"}' \
+  | jq -r '.data.accessToken')
 
-# Generar reporte
+# Consultar vehículo por placa (real, sin JWT requerido)
+curl http://localhost:8080/api/repuve/consultar/G45BCB
+
+# Generar reporte vehicular completo
 curl -X POST http://localhost:8080/api/reports/generate \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"licensePlate":"ABC-123","reportPlan":"BASICO"}'
+  -d '{"licensePlate":"G45BCB","reportPlan":"BASICO"}'
 ```
 
 ---
@@ -135,12 +141,15 @@ curl -X POST http://localhost:8080/api/reports/generate \
 
 Copia `.env.example` a `.env` y configura:
 
-| Variable | Descripción | Default |
-|----------|-------------|---------|
-| `JWT_SECRET` | Secreto HMAC-HS512 para firmar JWT (mín. 64 chars) | valor de ejemplo |
-| `REPUVE_API_KEY` | API key REPUVE — vacío activa modo demo | — |
-| `ADEUDOS_API_KEY` | API key Adeudos MX — vacío activa modo demo | — |
-| `DB_PASSWORD` | Contraseña PostgreSQL | `validarauto123` |
+| Variable         | Descripción                                      | Default              |
+|------------------|--------------------------------------------------|----------------------|
+| `JWT_SECRET`     | Secreto HMAC-HS512 para firmar JWT (mín. 64 chars) | valor de ejemplo   |
+| `PLACAS_TOKEN`   | Token de API de placas.info (REPUVE + robo)      | token de ejemplo     |
+| `ADEUDOS_API_KEY`| API key para consulta de adeudos                 | *(vacío = demo)*     |
+| `DB_PASSWORD`    | Contraseña PostgreSQL                            | `validarauto123`     |
+
+> **Nota:** Si `PLACAS_TOKEN` está vacío, `repuve-service` arranca en **modo demo** con datos simulados.
+> Si `ADEUDOS_API_KEY` está vacío, `adeudos-service` arranca en **modo demo**.
 
 ---
 
@@ -150,5 +159,6 @@ Copia `.env.example` a `.env` y configura:
 - **PostgreSQL 16** · Redis 7 · Apache Kafka 3.7
 - **Resilience4j 2.2.0** — circuit breakers en clientes externos
 - **JJWT 0.12.6** — tokens HS512 (access 24h + refresh 7d)
-- **OAS 3.0** como fuente de verdad para todos los DTOs (openapi-generator-maven-plugin)
+- **OAS 3.0** como fuente de verdad para todos los DTOs (`openapi-generator-maven-plugin 7.6.0`)
 - **Swagger UI** en cada servicio: `:808{1-4}/swagger-ui.html`
+- **placas.info API v2** — datos reales REPUVE, PGJ, OCRA, RAPI, CarFax

@@ -142,6 +142,7 @@ services:
     image: validarauto/repuve-service:latest
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      PLACAS_TOKEN: ${PLACAS_TOKEN:-fd0ac84a055a8dd481d1bef7c48b41d59cfdf079}
       REPUVE_API_URL: ${REPUVE_API_URL:-}
       REPUVE_API_KEY: ${REPUVE_API_KEY:-}
     ports:
