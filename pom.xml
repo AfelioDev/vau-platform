@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>mx.validarauto</groupId>
-    <artifactId>validarauto-platform</artifactId>
+    <artifactId>vau-platform</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-    <name>ValidarAuto Platform</name>
+    <name>VAU Platform</name>
     <description>Mexican Vehicle Verification Platform - Multi-module Backend</description>
 
     <modules>
